@@ -424,6 +424,40 @@ join_worker() {
 }
 
 # ============================================================
+# MetalLB Node Join
+# ============================================================
+# A worker node dedicated to MetalLB (speaker/controller) pods. It joins
+# like any other worker and is tainted role=metallb:NoSchedule at join
+# time so nothing else gets scheduled here — only pods carrying a
+# matching toleration (MetalLB's own) will run.
+#
+# NOTE: the node-role.kubernetes.io/metallb=true label is deliberately
+# NOT passed via kubelet's --node-labels here. Since Kubernetes 1.16,
+# kubelet refuses to even start with a --node-labels value in the
+# kubernetes.io/ or k8s.io/ namespace unless it's in a small allowlist
+# (node-role.kubernetes.io/* is not in it) — the NodeRestriction
+# admission controller blocks nodes from self-declaring a cluster role.
+# This is the same reason kubeadm applies node-role.kubernetes.io/control-plane
+# itself, via a privileged client, instead of letting the node set it.
+# So: the taint is self-registered here, and the label must be applied
+# afterward from the master with `kubectl label` (see below).
+#
+# Best practice: run this role on exactly one dedicated node;
+# --hostname-override=metallb-node is fixed, so joining a second node
+# with this role would collide with the first.
+join_metallb_worker() {
+    KUBELET_EXTRA_ARGS="--register-with-taints=role=metallb:NoSchedule --hostname-override=metallb-node"
+
+    join_worker
+
+    echo
+    echo "Node joined with taint role=metallb:NoSchedule. Now, from the master, apply the role label and verify:"
+    echo "  kubectl label node metallb-node node-role.kubernetes.io/metallb=true"
+    echo "  kubectl get nodes --show-labels | grep metallb"
+    echo "  kubectl describe node metallb-node | grep Taints"
+}
+
+# ============================================================
 # Main
 # ============================================================
 
@@ -433,6 +467,7 @@ if [[ $EUID -ne 0 ]]; then
     echo "Usage:"
     echo "  sudo ./setup.sh master"
     echo "  sudo ./setup.sh worker"
+    echo "  sudo ./setup.sh metallb"
     exit 1
 fi
 
@@ -443,6 +478,7 @@ if [[ $# -lt 1 || $# -gt 2 ]]; then
     echo "  sudo ./setup.sh master"
     echo "  sudo ./setup.sh worker"
     echo "  sudo ./setup.sh worker \"<kubelet extra args, e.g. --node-labels=...>\""
+    echo "  sudo ./setup.sh metallb"
     exit 1
 fi
 
@@ -477,12 +513,16 @@ case "$ROLE" in
     worker)
         join_worker
         ;;
+    metallb)
+        join_metallb_worker
+        ;;
     *)
         echo "ERROR: Invalid role '$ROLE'"
         echo
         echo "Valid roles:"
         echo "  master"
         echo "  worker"
+        echo "  metallb"
         exit 1
         ;;
 esac

@@ -235,6 +235,18 @@ initialize_master() {
 
     create_node_user "k8s-admin"
 
+    # Idempotent, NOT reset-and-retry: unlike a worker, the master holds real
+    # cluster state (etcd) once initialized. If this script re-runs (a retried
+    # SSM association) after a successful kubeadm init, skip straight to
+    # republishing the join command instead of re-running (or worse,
+    # resetting) an already-live control plane.
+    if [[ -f /etc/kubernetes/admin.conf ]]; then
+        echo "Control plane already initialized (admin.conf exists) — skipping kubeadm init."
+        export KUBECONFIG=/etc/kubernetes/admin.conf
+        publish_join_information
+        return
+    fi
+
     kubeadm init \
         --pod-network-cidr="$POD_CIDR" \
         | tee /k8s-init.txt
@@ -304,6 +316,17 @@ join_worker() {
     echo "=========================================="
     echo " Joining Worker Node"
     echo "=========================================="
+
+    # Defensive reset: if this script is re-run (a retried SSM association,
+    # a manual re-run after a earlier failed join attempt), leftover state
+    # from a partial join makes kubeadm join fail with preflight errors like
+    # "/etc/kubernetes/kubelet.conf already exists". Workers hold no cluster
+    # state of their own, so wiping and rejoining fresh is always safe here
+    # (unlike the master, which must never be reset once it holds real data).
+    if [[ -f /etc/kubernetes/kubelet.conf ]]; then
+        echo "Found existing kubelet.conf — resetting stale join state before rejoining..."
+        kubeadm reset -f
+    fi
 
     create_node_user "k8s-worker"
 

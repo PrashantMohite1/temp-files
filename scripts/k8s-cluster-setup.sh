@@ -376,9 +376,11 @@ join_worker() {
         fi
     fi
 
-    # Optional 2nd script argument: extra flags appended to kubeadm join,
-    # e.g. "--node-labels=... --register-with-taints=role=metallb:NoSchedule"
-    # so this one node can be isolated for MetalLB without a separate code path.
+    # Optional 2nd script argument: extra flags appended to kubeadm join.
+    # Must be valid `kubeadm join` flags (e.g. "--node-name=metallb-node") —
+    # NOT kubelet flags like --node-labels/--register-with-taints, which
+    # kubeadm join will reject with "unknown flag". Labeling/tainting a node
+    # is done afterward from the master via kubectl instead.
     if [[ -n "${EXTRA_JOIN_ARGS:-}" ]]; then
         join_cmd="${join_cmd} ${EXTRA_JOIN_ARGS}"
     fi

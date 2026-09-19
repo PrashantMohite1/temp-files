@@ -399,13 +399,17 @@ join_worker() {
         fi
     fi
 
-    # Optional 2nd script argument: extra flags appended to kubeadm join.
-    # Must be valid `kubeadm join` flags (e.g. "--node-name=metallb-node") —
-    # NOT kubelet flags like --node-labels/--register-with-taints, which
-    # kubeadm join will reject with "unknown flag". Labeling/tainting a node
-    # is done afterward from the master via kubectl instead.
-    if [[ -n "${EXTRA_JOIN_ARGS:-}" ]]; then
-        join_cmd="${join_cmd} ${EXTRA_JOIN_ARGS}"
+    # Optional 2nd script argument: kubelet flags (e.g. --node-labels,
+    # --register-with-taints, --hostname-override) written to
+    # /etc/default/kubelet BEFORE joining. kubeadm join itself has no CLI
+    # flag for these — they're kubelet flags, not kubeadm flags — but
+    # kubelet reads KUBELET_EXTRA_ARGS from /etc/default/kubelet on its very
+    # first startup (which kubeadm join triggers), so the node registers
+    # with the API server already labeled/tainted/named in one shot. No
+    # separate post-join kubectl step, no window where the node is
+    # unlabeled/untainted.
+    if [[ -n "${KUBELET_EXTRA_ARGS:-}" ]]; then
+        echo "KUBELET_EXTRA_ARGS=${KUBELET_EXTRA_ARGS}" > /etc/default/kubelet
     fi
 
     echo "Executing cluster join command..."
@@ -438,12 +442,12 @@ if [[ $# -lt 1 || $# -gt 2 ]]; then
     echo "Usage:"
     echo "  sudo ./setup.sh master"
     echo "  sudo ./setup.sh worker"
-    echo "  sudo ./setup.sh worker \"<extra kubeadm join flags>\""
+    echo "  sudo ./setup.sh worker \"<kubelet extra args, e.g. --node-labels=...>\""
     exit 1
 fi
 
 ROLE="$1"
-EXTRA_JOIN_ARGS="${2:-}"
+KUBELET_EXTRA_ARGS="${2:-}"
 
 
 # ============================================================
